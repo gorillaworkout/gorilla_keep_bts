@@ -12,15 +12,19 @@ export interface RegisterRequest {
 }
 
 export interface AuthResponse {
+  statusCode: number
+  message: string
+  errorMessage?: string | null
   data: {
     token: string
-  }
+  } | null
 }
 
 export interface ApiResponse<T> {
   statusCode: number
   message: string
-  data: T
+  errorMessage?: string | null
+  data: T | null
 }
 
 class ApiClient {
@@ -72,11 +76,11 @@ class ApiClient {
       headers,
     })
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-
-    return response.json()
+    const responseData = await response.json()
+    
+    // Return response data regardless of status code
+    // Let the calling function handle success/error logic
+    return responseData
   }
 
   async login(credentials: LoginRequest): Promise<AuthResponse> {
@@ -84,7 +88,7 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(credentials),
     })
-    return { data: response.data }
+    return response
   }
 
   async register(userData: RegisterRequest): Promise<AuthResponse> {
@@ -92,7 +96,7 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify(userData),
     })
-    return { data: response.data }
+    return response
   }
 
   async getAllChecklists(): Promise<ApiResponse<any[]>> {

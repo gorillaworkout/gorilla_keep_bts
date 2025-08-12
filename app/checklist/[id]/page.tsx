@@ -43,9 +43,9 @@ function extractItemName(item: any): string {
     }
   }
   
-  // Return empty string instead of hardcoded "Untitled Item"
-  // This will be handled in the UI to show appropriate placeholder
-  return ""
+  // If still no name found, return a default name instead of empty string
+  // This prevents "Click to add name..." from appearing
+  return "Untitled Item"
 }
 
 // Helper function to extract item ID
@@ -143,12 +143,44 @@ export default function ChecklistDetailPage({ params }: PageProps) {
             itemId = `item_index_${index}`
           }
           
-          console.log(`Final item ${itemId}: name="${itemName}", completed=${isCompleted}`)
+          // Try to restore item name from localStorage if API doesn't have it
+          let finalItemName = itemName
+          if (typeof window !== "undefined" && (itemName === "Untitled Item" || !itemName)) {
+            const itemNamesBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_itemNames`) || "{}")
+            if (itemNamesBackup[itemId]) {
+              finalItemName = itemNamesBackup[itemId]
+              console.log(`Restored item name for ${itemId} from localStorage: "${finalItemName}"`)
+            }
+          }
+          
+          // Try to restore completed status from localStorage if API doesn't have it
+          let finalCompletedStatus = isCompleted
+          if (typeof window !== "undefined") {
+            const completedStatusBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_completedStatus`) || "{}")
+            if (completedStatusBackup[itemId] !== undefined) {
+              finalCompletedStatus = completedStatusBackup[itemId]
+              console.log(`Restored completed status for ${itemId} from localStorage: ${finalCompletedStatus}`)
+            }
+          }
+          
+          console.log(`Final item ${itemId}: name="${finalItemName}", completed=${finalCompletedStatus}`)
+          console.log(`Item ${itemId} raw data:`, {
+            rawName: item.name,
+            rawTitle: item.title,
+            rawDescription: item.description,
+            rawItemName: item.itemName,
+            extractedName: itemName,
+            finalName: finalItemName,
+            rawCompleted: item.completed,
+            rawStatus: item.status,
+            extractedCompleted: isCompleted,
+            finalCompleted: finalCompletedStatus
+          })
           
           return {
             id: itemId,
-            name: itemName,
-            completed: isCompleted,
+            name: finalItemName,
+            completed: finalCompletedStatus,
           }
         }),
       })
@@ -181,6 +213,20 @@ export default function ChecklistDetailPage({ params }: PageProps) {
           completed: false
         }
         
+        // Save item name to localStorage as backup
+        if (typeof window !== "undefined") {
+          const itemNamesBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_itemNames`) || "{}")
+          itemNamesBackup[newItem.id] = name
+          localStorage.setItem(`checklist_${checklistId}_itemNames`, JSON.stringify(itemNamesBackup))
+          console.log(`Saved item name backup for ${newItem.id}: "${name}"`)
+          
+          // Also save completed status
+          const completedStatusBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_completedStatus`) || "{}")
+          completedStatusBackup[newItem.id] = false
+          localStorage.setItem(`checklist_${checklistId}_completedStatus`, JSON.stringify(completedStatusBackup))
+          console.log(`Saved completed status backup for ${newItem.id}: false`)
+        }
+        
         setChecklist((prev) => {
           if (!prev) return prev
           return {
@@ -204,16 +250,45 @@ export default function ChecklistDetailPage({ params }: PageProps) {
 
   const handleToggleComplete = async (itemId: string, completed: boolean) => {
     try {
+      console.log(`Toggling item ${itemId} to completed: ${completed}`)
+      console.log(`Current checklist state before toggle:`, checklist)
+      
       await apiClient.updateItemStatus(checklistId, itemId, { completed })
+      console.log(`API update successful for item ${itemId}`)
+      
+      // Save completed status to localStorage as backup
+      if (typeof window !== "undefined") {
+        const completedStatusBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_completedStatus`) || "{}")
+        completedStatusBackup[itemId] = completed
+        localStorage.setItem(`checklist_${checklistId}_completedStatus`, JSON.stringify(completedStatusBackup))
+        console.log(`Saved completed status backup for ${itemId}: ${completed}`)
+      }
+      
       // Update local state immediately for better UX
       setChecklist((prev) => {
         if (!prev) return prev
+        
+        const updatedItems = prev.items.map((item) => (item.id === itemId ? { ...item, completed } : item))
+        const completedCount = updatedItems.filter(item => item.completed).length
+        const totalCount = updatedItems.length
+        
+        console.log(`Updated local state for item ${itemId}:`, {
+          itemId,
+          newCompleted: completed,
+          completedCount,
+          totalCount,
+          updatedItems: updatedItems.map(item => ({ id: item.id, name: item.name, completed: item.completed }))
+        })
+        
         return {
           ...prev,
-          items: prev.items.map((item) => (item.id === itemId ? { ...item, completed } : item)),
+          items: updatedItems,
         }
       })
+      
+      console.log(`Successfully toggled item ${itemId} to completed: ${completed}`)
     } catch (err) {
+      console.error(`Failed to toggle item ${itemId}:`, err)
       setError("Failed to update item status")
       // Reload to revert changes on error
       await loadChecklistDetails()
@@ -224,6 +299,15 @@ export default function ChecklistDetailPage({ params }: PageProps) {
   const handleRenameItem = async (itemId: string, newName: string) => {
     try {
       await apiClient.renameItem(checklistId, itemId, newName)
+      
+      // Save item name to localStorage as backup
+      if (typeof window !== "undefined") {
+        const itemNamesBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_itemNames`) || "{}")
+        itemNamesBackup[itemId] = newName
+        localStorage.setItem(`checklist_${checklistId}_itemNames`, JSON.stringify(itemNamesBackup))
+        console.log(`Saved renamed item name backup for ${itemId}: "${newName}"`)
+      }
+      
       // Update local state immediately for better UX
       setChecklist((prev) => {
         if (!prev) return prev
@@ -354,13 +438,21 @@ export default function ChecklistDetailPage({ params }: PageProps) {
                 <div className="mt-6 pt-4 border-t border-gray-300">
                   <div className="flex items-center justify-between text-sm text-gray-600">
                     <span>
-                      {checklist.items.filter((item) => item.completed).length} of {checklist.items.length} completed
+                      {(() => {
+                        const completedCount = checklist.items.filter((item) => item.completed).length
+                        const totalCount = checklist.items.length
+                        console.log(`Counter calculation: ${completedCount}/${totalCount} completed`)
+                        return `${completedCount} of ${totalCount} completed`
+                      })()}
                     </span>
                     <span>
-                      {Math.round(
-                        (checklist.items.filter((item) => item.completed).length / checklist.items.length) * 100,
-                      )}
-                      % done
+                      {(() => {
+                        const completedCount = checklist.items.filter((item) => item.completed).length
+                        const totalCount = checklist.items.length
+                        const percentage = Math.round((completedCount / totalCount) * 100)
+                        console.log(`Percentage calculation: ${completedCount}/${totalCount} = ${percentage}%`)
+                        return `${percentage}% done`
+                      })()}
                     </span>
                   </div>
                 </div>

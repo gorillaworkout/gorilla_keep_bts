@@ -53,34 +53,35 @@ export function CreateChecklistDialog({ onCreateChecklist }: CreateChecklistDial
           New Checklist
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
-          <DialogTitle>Create New Checklist</DialogTitle>
-          <DialogDescription>Give your checklist a name and choose a color.</DialogDescription>
+      <DialogContent className="sm:max-w-[500px] p-0 border-0 shadow-xl">
+        <DialogHeader className="px-6 pt-6 pb-4">
+          <DialogTitle className="text-xl font-semibold">Create New Checklist</DialogTitle>
+          <DialogDescription className="text-gray-600">Give your checklist a name and choose a color.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-6 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="name">Name</Label>
+          <div className="px-6 pb-6 space-y-6">
+            <div className="space-y-2">
+              <Label htmlFor="name" className="text-sm font-medium text-gray-700">Name</Label>
               <Input
                 id="name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Enter checklist name"
+                className="h-12 text-lg border-2 focus:border-blue-500 focus:ring-blue-500"
                 required
               />
             </div>
-            <div className="grid gap-3">
-              <Label>Color</Label>
+            <div className="space-y-3">
+              <Label className="text-sm font-medium text-gray-700">Color</Label>
               <ColorGrid selectedColor={selectedColor} onColorChange={setSelectedColor} size="lg" />
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+          <DialogFooter className="px-6 py-4 bg-gray-50 border-t">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)} className="h-10">
               Cancel
             </Button>
-            <Button type="submit" disabled={isLoading || !name.trim()}>
-              {isLoading ? "Creating..." : "Create"}
+            <Button type="submit" disabled={isLoading || !name.trim()} className="h-10 px-6">
+              {isLoading ? "Creating..." : "Create Checklist"}
             </Button>
           </DialogFooter>
         </form>

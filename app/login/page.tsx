@@ -29,9 +29,17 @@ export default function LoginPage() {
 
     try {
       await login({ username, password })
-      router.push("/dashboard")
+      // Add a small delay to ensure token is saved
+      setTimeout(() => {
+        router.push("/dashboard")
+        router.refresh()
+      }, 100)
     } catch (err) {
-      setError("Invalid username or password")
+      if (err instanceof Error) {
+        setError(err.message)
+      } else {
+        setError("Invalid username or password")
+      }
     } finally {
       setIsLoading(false)
     }

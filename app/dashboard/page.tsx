@@ -24,6 +24,8 @@ export default function DashboardPage() {
   const [checklists, setChecklists] = useState<Checklist[]>([])
   const [isLoadingChecklists, setIsLoadingChecklists] = useState(true)
   const [error, setError] = useState("")
+  const [draggedItem, setDraggedItem] = useState<string | null>(null)
+  const [dragOverItem, setDragOverItem] = useState<string | null>(null)
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -45,8 +47,9 @@ export default function DashboardPage() {
       console.log("Raw checklists response:", response)
       console.log("Raw checklists data:", response.data)
 
+      // Periksa jika response.data null atau undefined
       const checklistsWithCounts = await Promise.all(
-        response.data.map(async (item: any, index: number) => {
+        (response.data ?? []).map(async (item: any, index: number) => {
           console.log(`Processing checklist ${index}:`, item)
           console.log(`Checklist ${index} raw data:`, {
             id: item.id || item.checklistId,
@@ -71,6 +74,27 @@ export default function DashboardPage() {
               completedCount: completedItems.length,
             }
             
+            // Try to restore color from localStorage if API doesn't have it
+            if (typeof window !== "undefined" && (!item.color || item.color === "yellow")) {
+              const colorBackup = JSON.parse(localStorage.getItem("checklistColors") || "{}")
+              if (colorBackup[checklist.id]) {
+                checklist.color = colorBackup[checklist.id]
+                console.log(`Restored color for checklist ${checklist.id} from localStorage:`, checklist.color)
+              }
+            }
+            
+            // Try to restore completed count from localStorage if API count seems wrong
+            if (typeof window !== "undefined") {
+              const completedStatusBackup = JSON.parse(localStorage.getItem(`checklist_${checklist.id}_completedStatus`) || "{}")
+              const localStorageCompletedCount = Object.values(completedStatusBackup).filter(status => status === true).length
+              
+              if (localStorageCompletedCount > 0 && localStorageCompletedCount !== checklist.completedCount) {
+                console.log(`Counter mismatch for checklist ${checklist.id}: API=${checklist.completedCount}, localStorage=${localStorageCompletedCount}`)
+                checklist.completedCount = localStorageCompletedCount
+                console.log(`Restored completed count for checklist ${checklist.id} from localStorage: ${localStorageCompletedCount}`)
+              }
+            }
+            
             console.log(`Processed checklist ${index}:`, checklist)
             console.log(`Checklist ${index} final color:`, checklist.color)
             console.log(`Checklist ${index} raw color from API:`, item.color)
@@ -92,6 +116,31 @@ export default function DashboardPage() {
       )
 
       console.log("Final processed checklists:", checklistsWithCounts)
+      
+      // Restore order from localStorage if available
+      if (typeof window !== "undefined") {
+        const savedOrder = localStorage.getItem('checklistOrder')
+        if (savedOrder) {
+          try {
+            const orderData = JSON.parse(savedOrder)
+            const orderedChecklists = [...checklistsWithCounts]
+            
+            // Sort based on saved order
+            orderedChecklists.sort((a, b) => {
+              const aOrder = orderData.find((o: any) => o.id === a.id)?.order ?? 999
+              const bOrder = orderData.find((o: any) => o.id === b.id)?.order ?? 999
+              return aOrder - bOrder
+            })
+            
+            setChecklists(orderedChecklists)
+            console.log("Restored checklist order from localStorage")
+            return
+          } catch (err) {
+            console.warn("Failed to restore checklist order:", err)
+          }
+        }
+      }
+      
       setChecklists(checklistsWithCounts)
       setError("")
     } catch (err) {
@@ -140,11 +189,104 @@ export default function DashboardPage() {
 
   const handleDeleteChecklist = async (id: string) => {
     try {
-      await apiClient.deleteChecklist(id)
+      console.log(`Attempting to delete checklist ${id}`)
+      
+      // First, check if checklist has items that might prevent deletion
+      const checklistToDelete = checklists.find(c => c.id === id)
+      if (checklistToDelete && (checklistToDelete.itemCount || 0) > 0) {
+        console.log(`Checklist ${id} has ${checklistToDelete.itemCount || 0} items, attempting to delete items first`)
+        
+        try {
+          // Try to delete all items first
+          const itemsResponse = await apiClient.getChecklistItems(id)
+          const items = itemsResponse.data || []
+          
+          for (const item of items) {
+            try {
+              await apiClient.deleteItem(id, item.id || item.itemId)
+              console.log(`Deleted item ${item.id || item.itemId} from checklist ${id}`)
+            } catch (itemDeleteErr) {
+              console.warn(`Failed to delete item ${item.id || item.itemId}:`, itemDeleteErr)
+            }
+          }
+        } catch (itemsErr) {
+          console.warn(`Failed to get items for checklist ${id}:`, itemsErr)
+        }
+      }
+      
+      // Now try to delete the checklist
+      const response = await apiClient.deleteChecklist(id)
+      console.log("Delete checklist response:", response)
+      
+      // Remove from local state
       setChecklists(checklists.filter((checklist) => checklist.id !== id))
+      
+      // Clean up localStorage backups
+      if (typeof window !== "undefined") {
+        // Remove color backup
+        const colorBackup = JSON.parse(localStorage.getItem("checklistColors") || "{}")
+        delete colorBackup[id]
+        localStorage.setItem("checklistColors", JSON.stringify(colorBackup))
+        
+        // Remove item names backup
+        const itemNamesBackup = JSON.parse(localStorage.getItem(`checklist_${id}_itemNames`) || "{}")
+        localStorage.removeItem(`checklist_${id}_itemNames`)
+        
+        // Remove completed status backup
+        const completedStatusBackup = JSON.parse(localStorage.getItem(`checklist_${id}_completedStatus`) || "{}")
+        localStorage.removeItem(`checklist_${id}_completedStatus`)
+        
+        console.log(`Cleaned up localStorage backups for checklist ${id}`)
+      }
+      
+      console.log(`Successfully deleted checklist ${id}`)
+      
     } catch (err) {
-      setError("Failed to delete checklist")
-      throw err
+      console.error(`Failed to delete checklist ${id}:`, err)
+      
+      // Provide more specific error messages based on error type
+      if (err instanceof Error) {
+        if (err.message.includes('500')) {
+          console.warn(`Server error 500 for checklist ${id}, attempting fallback deletion`)
+          
+          // Try fallback approach: remove from local state and localStorage
+          // This allows user to continue using the app even if server is down
+          try {
+            setChecklists(checklists.filter((checklist) => checklist.id !== id))
+            
+            // Clean up localStorage backups
+            if (typeof window !== "undefined") {
+              const colorBackup = JSON.parse(localStorage.getItem("checklistColors") || "{}")
+              delete colorBackup[id]
+              localStorage.setItem("checklistColors", JSON.stringify(colorBackup))
+              
+              localStorage.removeItem(`checklist_${id}_itemNames`)
+              localStorage.removeItem(`checklist_${id}_completedStatus`)
+              
+              console.log(`Fallback: removed checklist ${id} from local state and localStorage`)
+            }
+            
+            setError("Checklist removed locally due to server error. It may still exist on the server. Please try again later.")
+            return
+            
+          } catch (fallbackErr) {
+            console.error(`Fallback deletion also failed for checklist ${id}:`, fallbackErr)
+          }
+          
+          setError("Server error occurred. The checklist may have items that need to be deleted first. Please try again.")
+        } else if (err.message.includes('404')) {
+          setError("Checklist not found. It may have already been deleted.")
+        } else if (err.message.includes('403')) {
+          setError("Permission denied. You may not have access to delete this checklist.")
+        } else {
+          setError(`Failed to delete checklist: ${err.message}`)
+        }
+      } else {
+        setError("Failed to delete checklist. Please try again.")
+      }
+      
+      // Don't throw error to prevent UI from breaking
+      // Just show error message to user
     }
   }
 
@@ -160,6 +302,14 @@ export default function DashboardPage() {
       setChecklists(
         checklists.map((checklist) => (checklist.id === id ? { ...checklist, color: newColor } : checklist)),
       )
+      
+      // Save color to localStorage as backup
+      if (typeof window !== "undefined") {
+        const colorBackup = JSON.parse(localStorage.getItem("checklistColors") || "{}")
+        colorBackup[id] = newColor
+        localStorage.setItem("checklistColors", JSON.stringify(colorBackup))
+        console.log(`Saved color backup for checklist ${id}:`, newColor)
+      }
       
       // Now try to sync with server
       try {
@@ -194,16 +344,162 @@ export default function DashboardPage() {
     router.push("/login")
   }
 
+  // Function to create item from checklist card
+  const handleCreateItemFromCard = async (checklistId: string, itemName: string) => {
+    try {
+      console.log(`Creating item "${itemName}" in checklist ${checklistId} from card`)
+      
+      // Create item using existing API
+      const response = await apiClient.saveChecklistItem(checklistId, { name: itemName, completed: false })
+      console.log("Item created from card:", response)
+      
+      // Update local state to reflect new item
+      setChecklists(prev => 
+        prev.map(checklist => 
+          checklist.id === checklistId 
+            ? { 
+                ...checklist, 
+                itemCount: (checklist.itemCount || 0) + 1,
+                completedCount: checklist.completedCount || 0
+              }
+            : checklist
+        )
+      )
+      
+      // Save item name to localStorage as backup
+      if (typeof window !== "undefined") {
+        const itemNamesBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_itemNames`) || "{}")
+        if (response.data && response.data.id) {
+          itemNamesBackup[response.data.id] = itemName
+          localStorage.setItem(`checklist_${checklistId}_itemNames`, JSON.stringify(itemNamesBackup))
+          
+          // Also save completed status
+          const completedStatusBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_completedStatus`) || "{}")
+          completedStatusBackup[response.data.id] = false
+          localStorage.setItem(`checklist_${checklistId}_completedStatus`, JSON.stringify(completedStatusBackup))
+        }
+      }
+      
+      console.log(`Successfully added item "${itemName}" to checklist ${checklistId}`)
+      
+    } catch (err) {
+      console.error(`Failed to create item in checklist ${checklistId}:`, err)
+      throw err
+    }
+  }
+
+  // Function to update checklist counter from localStorage
+  const updateChecklistCounter = (checklistId: string) => {
+    if (typeof window !== "undefined") {
+      const completedStatusBackup = JSON.parse(localStorage.getItem(`checklist_${checklistId}_completedStatus`) || "{}")
+      const localStorageCompletedCount = Object.values(completedStatusBackup).filter(status => status === true).length
+      
+      setChecklists(prev => 
+        prev.map(checklist => 
+          checklist.id === checklistId 
+            ? { ...checklist, completedCount: localStorageCompletedCount }
+            : checklist
+        )
+      )
+      
+      console.log(`Updated counter for checklist ${checklistId}: ${localStorageCompletedCount} completed`)
+    }
+  }
+
+  // Drag and Drop functions
+  const handleDragStart = (e: React.DragEvent, checklistId: string) => {
+    setDraggedItem(checklistId)
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/html', checklistId)
+  }
+
+  const handleDragOver = (e: React.DragEvent, checklistId: string) => {
+    e.preventDefault()
+    if (draggedItem && draggedItem !== checklistId) {
+      setDragOverItem(checklistId)
+    }
+  }
+
+  const handleDragLeave = () => {
+    setDragOverItem(null)
+  }
+
+  const handleDrop = (e: React.DragEvent, targetChecklistId: string) => {
+    e.preventDefault()
+    
+    if (draggedItem && draggedItem !== targetChecklistId) {
+      const draggedIndex = checklists.findIndex(c => c.id === draggedItem)
+      const targetIndex = checklists.findIndex(c => c.id === targetChecklistId)
+      
+      if (draggedIndex !== -1 && targetIndex !== -1) {
+        const newChecklists = [...checklists]
+        const [draggedChecklist] = newChecklists.splice(draggedIndex, 1)
+        newChecklists.splice(targetIndex, 0, draggedChecklist)
+        
+        setChecklists(newChecklists)
+        
+        // Save new order to localStorage
+        if (typeof window !== "undefined") {
+          const orderData = newChecklists.map((c, index) => ({ id: c.id, order: index }))
+          localStorage.setItem('checklistOrder', JSON.stringify(orderData))
+        }
+        
+        console.log(`Moved checklist ${draggedItem} to position ${targetIndex}`)
+      }
+    }
+    
+    setDraggedItem(null)
+    setDragOverItem(null)
+  }
+
+  const handleDragEnd = () => {
+    setDraggedItem(null)
+    setDragOverItem(null)
+  }
+
+  // Listen for storage changes to update counters in real-time
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('checklist_') && e.key.endsWith('_completedStatus')) {
+        const checklistId = e.key.replace('checklist_', '').replace('_completedStatus', '')
+        console.log(`Storage change detected for checklist ${checklistId}`)
+        updateChecklistCounter(checklistId)
+      }
+    }
+
+    const handleFocus = () => {
+      console.log("Dashboard focused, updating all counters from localStorage")
+      // Update all checklist counters when dashboard is focused
+      checklists.forEach(checklist => {
+        updateChecklistCounter(checklist.id)
+      })
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener('storage', handleStorageChange)
+      window.addEventListener('focus', handleFocus)
+      return () => {
+        window.removeEventListener('storage', handleStorageChange)
+        window.removeEventListener('focus', handleFocus)
+      }
+    }
+  }, [checklists])
+
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
-        <header className="bg-white shadow-sm border-b">
+        <header className="bg-white shadow-sm border-b sticky top-0 z-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="flex justify-between items-center h-16">
-              <h1 className="text-xl font-semibold text-gray-900">Todo Lists</h1>
-              <Button variant="outline" onClick={handleLogout}>
-                Logout
-              </Button>
+              <div className="flex items-center space-x-4">
+                <h1 className="text-2xl font-bold text-gray-900">🦍 Gorilla Keep</h1>
+                <span className="text-sm text-gray-500 hidden sm:block">Your personal checklist app</span>
+              </div>
+              <div className="flex items-center space-x-3">
+                <Button variant="outline" onClick={handleLogout} className="h-9">
+                  Logout
+                </Button>
+              </div>
             </div>
           </div>
         </header>
@@ -215,38 +511,30 @@ export default function DashboardPage() {
             </Alert>
           )}
 
-          {/* Debug Panel - Hapus setelah masalah teratasi */}
-          {process.env.NODE_ENV === 'development' && checklists.length > 0 && (
-            <div className="mb-6 p-4 bg-gray-100 rounded-lg border">
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Debug Info:</h3>
-              <div className="text-xs text-gray-600 space-y-1">
-                <div>Total Checklists: {checklists.length}</div>
-                {checklists.map((checklist, index) => (
-                  <div key={checklist.id} className="ml-2">
-                    <div>Checklist {index + 1}: ID={checklist.id}, Name="{checklist.name}", Color={checklist.color}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="mb-8">
-            <CreateChecklistDialog onCreateChecklist={handleCreateChecklist} />
-          </div>
 
           {isLoadingChecklists ? (
-            <div className="text-center py-12">
+            <div className="text-center py-16">
               <div className="text-lg text-gray-600">Loading your checklists...</div>
             </div>
           ) : checklists.length === 0 ? (
-            <div className="text-center py-12">
-              <h2 className="text-2xl font-bold text-gray-900 mb-4">No checklists yet</h2>
-              <p className="text-gray-600 mb-8">Create your first checklist to get started</p>
+            <div className="text-center py-16">
+              <div className="max-w-md mx-auto">
+                <div className="text-6xl mb-4">🦍</div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-4">Welcome to Gorilla Keep!</h2>
+                <p className="text-gray-600 mb-8">Create your first checklist to get started. Organize your tasks, track your progress, and stay productive.</p>
+                <CreateChecklistDialog onCreateChecklist={handleCreateChecklist} />
+              </div>
             </div>
           ) : (
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 mb-6">Your Checklists</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              <div className="flex items-center justify-between mb-8">
+                <div>
+                  <h2 className="text-2xl font-bold text-gray-900">Your Checklists</h2>
+                  <p className="text-gray-600 mt-1">Manage and organize your tasks</p>
+                </div>
+                <CreateChecklistDialog onCreateChecklist={handleCreateChecklist} />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {checklists.map((checklist) => (
                   <ChecklistCard
                     key={checklist.id}
@@ -257,6 +545,14 @@ export default function DashboardPage() {
                     completedCount={checklist.completedCount}
                     onDelete={handleDeleteChecklist}
                     onColorChange={handleColorChange}
+                    onCreateItem={handleCreateItemFromCard}
+                    onDragStart={handleDragStart}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onDragEnd={handleDragEnd}
+                    isDragged={draggedItem === checklist.id}
+                    isDragOver={dragOverItem === checklist.id}
                   />
                 ))}
               </div>

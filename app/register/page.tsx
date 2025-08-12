@@ -19,6 +19,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
   const [error, setError] = useState("")
+  const [success, setSuccess] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
   const { register } = useAuth()
@@ -27,6 +28,13 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError("")
+    setSuccess("")
+
+    // Validate password length
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters long")
+      return
+    }
 
     if (password !== confirmPassword) {
       setError("Passwords do not match")
@@ -37,9 +45,18 @@ export default function RegisterPage() {
 
     try {
       await register({ username, email, password })
-      router.push("/dashboard")
+      setSuccess("Registration successful! Redirecting to login...")
+      setTimeout(() => {
+        router.push("/login")
+      }, 1500)
     } catch (err) {
-      setError("Registration failed. Please try again.")
+      if (err instanceof Error) {
+        // Log error for debugging but don't show internal error details to user
+        console.error("Registration error:", err)
+        setError(err.message)
+      } else {
+        setError("Registration failed. Please try again.")
+      }
     } finally {
       setIsLoading(false)
     }
@@ -58,6 +75,11 @@ export default function RegisterPage() {
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              {success && (
+                <Alert className="border-green-200 bg-green-50 text-green-800">
+                  <AlertDescription>{success}</AlertDescription>
                 </Alert>
               )}
 
