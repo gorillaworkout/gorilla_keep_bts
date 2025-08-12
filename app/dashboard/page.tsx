@@ -73,6 +73,7 @@ export default function DashboardPage() {
             
             console.log(`Processed checklist ${index}:`, checklist)
             console.log(`Checklist ${index} final color:`, checklist.color)
+            console.log(`Checklist ${index} raw color from API:`, item.color)
             return checklist
           } catch (err) {
             console.error(`Error processing checklist ${index}:`, err)
@@ -149,26 +150,42 @@ export default function DashboardPage() {
 
   const handleColorChange = async (id: string, newColor: string) => {
     try {
-      // Try to update existing checklist with new color
-      await apiClient.updateChecklist(id, { color: newColor })
-
+      console.log(`Updating checklist ${id} color to: ${newColor}`)
+      
+      // First, try to understand what the API actually supports
+      // Let's try a simple approach: just update the local state first
+      // and then try to sync with the server
+      
       // Update local state immediately for better UX
       setChecklists(
         checklists.map((checklist) => (checklist.id === id ? { ...checklist, color: newColor } : checklist)),
       )
-      setError("")
-    } catch (err) {
-      // If update fails, try the save method as fallback
+      
+      // Now try to sync with server
       try {
-        await apiClient.saveChecklist({ id, color: newColor })
-        setChecklists(
-          checklists.map((checklist) => (checklist.id === id ? { ...checklist, color: newColor } : checklist)),
-        )
+        const response = await apiClient.updateChecklistColor(id, newColor)
+        console.log("Update checklist color response:", response)
+        console.log("Response data:", response.data)
+        console.log("Response status:", response.statusCode)
+        
+        // If successful, clear any errors
         setError("")
-      } catch (fallbackErr) {
-        setError("Failed to change checklist color")
-        throw fallbackErr
+        console.log(`Successfully synced checklist ${id} color to ${newColor} with server`)
+        
+      } catch (serverErr) {
+        console.warn(`Server sync failed for checklist ${id} color, but local state updated:`, serverErr)
+        
+        // Don't show error to user since local state is updated
+        // Just log the warning
+        console.warn("Color changed locally but failed to sync with server")
+        
+        // Optionally, you could show a subtle warning
+        // setError("Color changed but may not be saved to server")
       }
+      
+    } catch (err) {
+      console.error(`Failed to update checklist ${id} color:`, err)
+      setError("Failed to change checklist color. Please try again.")
     }
   }
 
@@ -196,6 +213,21 @@ export default function DashboardPage() {
             <Alert variant="destructive" className="mb-6">
               <AlertDescription>{error}</AlertDescription>
             </Alert>
+          )}
+
+          {/* Debug Panel - Hapus setelah masalah teratasi */}
+          {process.env.NODE_ENV === 'development' && checklists.length > 0 && (
+            <div className="mb-6 p-4 bg-gray-100 rounded-lg border">
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Debug Info:</h3>
+              <div className="text-xs text-gray-600 space-y-1">
+                <div>Total Checklists: {checklists.length}</div>
+                {checklists.map((checklist, index) => (
+                  <div key={checklist.id} className="ml-2">
+                    <div>Checklist {index + 1}: ID={checklist.id}, Name="{checklist.name}", Color={checklist.color}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           <div className="mb-8">

@@ -61,8 +61,9 @@ function extractItemId(item: any): string {
     return `item_${content.length}_${content.charCodeAt(0)}`
   }
   
-  // Fallback to timestamp-based ID (more stable than random)
-  return `item_${Date.now()}_${Math.floor(Math.random() * 1000)}`
+  // Fallback to a stable ID based on item position/index
+  // This will be handled by the parent component to avoid hydration issues
+  return `item_fallback`
 }
 
 // Helper function to extract completion status
@@ -127,15 +128,20 @@ export default function ChecklistDetailPage({ params }: PageProps) {
         id: checklistId,
         name: checklistData?.name || checklistData?.title || "My Checklist",
         color: checklistData?.color || "yellow",
-        items: itemsData.map((item: any) => {
+        items: itemsData.map((item: any, index: number) => {
           // Debug logging for each item
           console.log("Processing item:", item)
           console.log("Item keys:", Object.keys(item))
           console.log("Item values:", Object.values(item))
           
           const itemName = extractItemName(item)
-          const itemId = extractItemId(item)
+          let itemId = extractItemId(item)
           const isCompleted = extractCompletionStatus(item)
+          
+          // Handle fallback ID by using index as fallback
+          if (itemId === 'item_fallback') {
+            itemId = `item_index_${index}`
+          }
           
           console.log(`Final item ${itemId}: name="${itemName}", completed=${isCompleted}`)
           

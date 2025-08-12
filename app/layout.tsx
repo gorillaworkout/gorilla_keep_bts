@@ -8,7 +8,7 @@ import { AuthProvider } from "@/contexts/auth-context"
 export const metadata: Metadata = {
   title: "Todo List App",
   description: "Google Keep-style todo list application",
-  generator: "v0.dev",
+  generator: "gorilla_keep_bts",
 }
 
 export default function RootLayout({
@@ -17,7 +17,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <style>{`
 html {
@@ -27,7 +27,7 @@ html {
 }
         `}</style>
       </head>
-      <body>
+      <body suppressHydrationWarning>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

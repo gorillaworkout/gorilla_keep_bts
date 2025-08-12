@@ -20,11 +20,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    // Check if user is already logged in
-    const token = localStorage.getItem("token")
-    if (token) {
-      apiClient.setToken(token)
-      setIsAuthenticated(true)
+    // Check if user is already logged in (only on client side)
+    if (typeof window !== "undefined") {
+      const token = localStorage.getItem("token")
+      if (token) {
+        apiClient.setToken(token)
+        setIsAuthenticated(true)
+      }
     }
     setIsLoading(false)
   }, [])

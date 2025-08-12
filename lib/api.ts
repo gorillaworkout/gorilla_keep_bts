@@ -29,14 +29,13 @@ class ApiClient {
 
   constructor(baseURL: string) {
     this.baseURL = baseURL
-    // Get token from localStorage if available
-    if (typeof window !== "undefined") {
-      this.token = localStorage.getItem("token")
-    }
+    // Don't access localStorage during SSR
+    this.token = null
   }
 
   setToken(token: string) {
     this.token = token
+    // Only access localStorage on client side
     if (typeof window !== "undefined") {
       localStorage.setItem("token", token)
     }
@@ -44,8 +43,16 @@ class ApiClient {
 
   clearToken() {
     this.token = null
+    // Only access localStorage on client side
     if (typeof window !== "undefined") {
       localStorage.removeItem("token")
+    }
+  }
+
+  // Initialize token from localStorage (call this on client side)
+  initializeFromStorage() {
+    if (typeof window !== "undefined") {
+      this.token = localStorage.getItem("token")
     }
   }
 
@@ -104,6 +111,31 @@ class ApiClient {
       method: "PUT",
       body: JSON.stringify(updates),
     })
+  }
+
+  async updateChecklistColor(checklistId: string, color: string): Promise<ApiResponse<any>> {
+    // Try different endpoints that might be more compatible
+    try {
+      // First try the standard update endpoint
+      return await this.request<any>(`/checklist/${checklistId}`, {
+        method: "PUT",
+        body: JSON.stringify({ color }),
+      })
+    } catch (err) {
+      // If PUT fails, try PATCH method
+      try {
+        return await this.request<any>(`/checklist/${checklistId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ color }),
+        })
+      } catch (patchErr) {
+        // If PATCH also fails, try POST to a color-specific endpoint
+        return await this.request<any>(`/checklist/${checklistId}/color`, {
+          method: "POST",
+          body: JSON.stringify({ color }),
+        })
+      }
+    }
   }
 
   async deleteChecklist(checklistId: string): Promise<ApiResponse<any>> {
