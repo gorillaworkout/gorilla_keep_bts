@@ -1,4 +1,4 @@
-const API_BASE_URL = "http://94.74.86.174:8080/api"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://94.74.86.174:8080/api"
 
 export interface LoginRequest {
   username: string
